@@ -22,6 +22,8 @@ node_modules
 !public/**/*.gif
 !public/**/*.webp
 !public/**/*.svg
+!public/**/*.mp4
+!public/**/*.webm
 
 after-*.yml
 amazon-*.yml
