@@ -35,6 +35,63 @@ async function isValidJwt(
   }
 }
 
+/**
+ * 一般向けストアの一時非公開スイッチ。true の間、CLOSED_STOREFRONT_PATHS は「準備中」(503)を返す。
+ * 卸(/partner, /wholesale)・請求書払い(/pay)・管理画面・webhook・購入済み顧客向け
+ * (/account, /orders/cancel, /success)・特商法等の表記ページは対象外。
+ * 再公開するときは false に戻してデプロイする。
+ */
+const IS_STOREFRONT_CLOSED = true;
+const CLOSED_STOREFRONT_PATHS = ["/", "/order", "/coverage", "/sign-up", "/api/checkout"];
+
+const STOREFRONT_CLOSED_HTML = `<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>ただいま準備中です | E-FIX</title>
+<style>
+  body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    background: #fff; color: #1f2937; font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", sans-serif; }
+  main { padding: 16px; text-align: center; }
+  h1 { margin: 0 0 16px; font-size: 22px; font-weight: 600; }
+  p { margin: 0 0 40px; font-size: 15px; line-height: 1.9; color: #6b7280; }
+  a { font-size: 13px; color: #2563eb; text-decoration: none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>ただいま準備中です</h1>
+  <p>現在、当サイトは一時的に公開を停止しています。<br>再開までしばらくお待ちください。</p>
+  <a href="/partner/login">販売店の方はこちら</a>
+</main>
+</body>
+</html>`;
+
+function storefrontClosedResponse(request: NextRequest): NextResponse | null {
+  if (!IS_STOREFRONT_CLOSED) return null;
+  const { pathname } = request.nextUrl;
+  const isClosedPath = CLOSED_STOREFRONT_PATHS.some(
+    (closedPath) =>
+      pathname === closedPath ||
+      (closedPath !== "/" && pathname.startsWith(`${closedPath}/`)),
+  );
+  if (!isClosedPath) return null;
+
+  const headers = { "Retry-After": "86400", "Cache-Control": "no-store" };
+  if (pathname.startsWith("/api/")) {
+    return NextResponse.json(
+      { error: "ただいま準備中です" },
+      { status: 503, headers },
+    );
+  }
+  return new NextResponse(STOREFRONT_CLOSED_HTML, {
+    status: 503,
+    headers: { ...headers, "Content-Type": "text/html; charset=utf-8" },
+  });
+}
+
 const isClerkAccountRoute = createRouteMatcher(["/account(.*)", "/api/account(.*)"]);
 
 /**
@@ -113,6 +170,9 @@ async function legacyAdminPartnerRouting(
  * /account 配下のみ auth.protect() でログイン必須にする(他のルートは全て公開のまま)。
  */
 export default clerkMiddleware(async (auth, request) => {
+  const closedResponse = storefrontClosedResponse(request);
+  if (closedResponse) return closedResponse;
+
   if (isClerkAccountRoute(request)) {
     await auth.protect();
   }
